@@ -20,7 +20,7 @@ jobs:
         run: docker build -t centos8-pyinstaller-builder -f .github/workflows/Dockerfile.centos8 .
 
       - name: Build Watchdog Troubleshoot Binary on CentOS 8
-        run: docker run --rm -v $(pwd):/app centos8-pyinstaller-builder bash -c "pip install pyinstaller && pyinstaller troubleshoot-wt.spec"
+        run: docker run --rm -v $(pwd):/app centos8-pyinstaller-builder bash -c "pip install -r /app/troubleshoot-wt/src/requirements.txt && pip install pyinstaller && pyinstaller /app/troubleshoot-wt/src/troubleshoot-wt.spec"
 
       - name: Prepare CentOS Troubleshoot Artifact for Upload
         run: |
