@@ -21,14 +21,16 @@ jobs:
 
       - name: Build Watchdog Troubleshoot Binary on CentOS 8
         run: |
+          mkdir -p build_output
           docker run --rm \
             -v $(pwd)/troubleshoot-wt:/app \
-            -v $(pwd)/build_output:/app/src/dist \
+            -v $(pwd)/build_output:/app/src/output \
             centos8-pyinstaller-builder bash -c "
               cd /app/src &&
               pip install -r requirements.txt &&
               pip install pyinstaller &&
-              pyinstaller troubleshoot-wt.spec
+              pyinstaller troubleshoot-wt.spec &&
+              cp dist/watchdog-troubleshoot output/
             "
 
 
