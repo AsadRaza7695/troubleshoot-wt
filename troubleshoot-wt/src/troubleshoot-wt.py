@@ -13,6 +13,11 @@ import json
 import threading
 import traceback
 
+# Create temporary directory for files before zipping
+TEMP_DIR = 'temp_capture'
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -20,9 +25,18 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+# Log file for this script
+SCRIPT_LOG_FILE = os.path.join(TEMP_DIR, 'troubleshoot.log')
+file_handler = logging.FileHandler(SCRIPT_LOG_FILE, encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter(
+    '[%(asctime)s] %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+))
+logger.addHandler(file_handler)
+
 
 # Configuration
-PHISHTANK_URL = 'http://data.phishtank.com/data/online-valid.csv.gz'
+PHISHTANK_URL = 'http://data.phishtank.com/data/online-valid.csv.bz2'
 URLHAUS_URL = 'https://urlhaus.abuse.ch/downloads/csv/'
 CONFIG_PATH = "/opt/watchdog/watchdog/watchdog.conf"
 
@@ -66,9 +80,6 @@ if proxy_mode:
     else:
         raise ValueError("Proxy mode is enabled but no proxy URL found.")
 
-# Create temporary directory for files before zipping
-TEMP_DIR = 'temp_capture'
-os.makedirs(TEMP_DIR, exist_ok=True)
 
 # Global variable to control shutdown
 job_executed = False
@@ -340,6 +351,16 @@ def create_final_zip_archive():
         
         # Add opt logs to zip (only once)
         collect_logs_into_zip(zipf)
+        # Add troubleshoot script log
+        if os.path.exists(SCRIPT_LOG_FILE):
+            try:
+                with open(SCRIPT_LOG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                    zipf.writestr("troubleshoot_logs/troubleshoot.log", f.read())
+                logger.info("✅ Added troubleshoot.log to final ZIP.")
+            except Exception as e:
+                logger.error(f"❌ Failed to add troubleshoot.log to ZIP: {e}")
+                zipf.writestr("troubleshoot_logs/error.txt", f"Error reading troubleshoot.log: {e}")
+
         
         # Add a comprehensive summary file
         summary = f"""Network Traffic Capture Complete Summary
@@ -410,13 +431,24 @@ def collect_data_with_capture(label=""):
 
     tcpdump_proc = None
     if proxy_mode:
-        with open(dumplog_file, 'w') as err_log:
-            logger.info(f"Monitoring traffic to proxy at {PROXY_IP}:{PROXY_PORT}")
-            tcpdump_proc = subprocess.Popen(
-                ['tcpdump', '-i', 'any', 'tcp', 'and', 'host', PROXY_IP, 'and', 'port', str(PROXY_PORT), '-w', pcap_file],
-                stdout=subprocess.DEVNULL,
-                stderr=err_log
-            )
+        logger.info(f"Monitoring traffic to proxy at {PROXY_IP}:{PROXY_PORT}")
+        tcpdump_proc = subprocess.Popen(
+            ['tcpdump', '-i', 'any', 'tcp', 'and', 'host', PROXY_IP, 'and', 'port', str(PROXY_PORT), '-w', pcap_file],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Start a thread to capture and log stderr output
+        def log_tcpdump_stderr(pipe, logfile_path):
+            with open(logfile_path, 'w') as log_file:
+                for line in iter(pipe.readline, ''):
+                    logger.warning(f"[tcpdump] {line.strip()}")
+                    log_file.write(line)
+                pipe.close()
+
+        threading.Thread(target=log_tcpdump_stderr, args=(tcpdump_proc.stderr, dumplog_file), daemon=True).start()
+
 
     try:
         time.sleep(2)  # Allow tcpdump to initialize
@@ -488,7 +520,10 @@ def collect_data_with_capture(label=""):
         if tcpdump_proc:
             logger.info("Stopping tcpdump...")
             tcpdump_proc.terminate()
-            tcpdump_proc.wait()
+            exit_code = tcpdump_proc.wait()
+            logger.info(f"tcpdump terminated with exit code: {exit_code}")
+            if exit_code != 0:
+                logger.warning(f"tcpdump may have failed. Check logs at {dumplog_file}")
         
         # Store session info for later zipping
         session_info = {
@@ -504,7 +539,7 @@ def collect_data_with_capture(label=""):
             logger.warning(f"⚠️  Session had connection errors - check diagnostics file")
         
         if not label:
-            logger.info("TCPDUMP for Scheduler is completed, you can stop script by pressing 'ctrl + c'")
+            logger.info("✅ TCPDUMP for Scheduler is completed, you can now stop script by pressing 'ctrl + c'")
 
 def cleanup_temp_directory():
     """Clean up the temporary directory on exit"""
@@ -529,12 +564,11 @@ if __name__ == '__main__':
         print(" - Store each session's diagnostics in JSON and a final ZIP")
         print(" - Collect logs from Watchdog and ETI components under /opt")
         print(" - Retry failed downloads up to 3 times with diagnostics")
-        print(" - Once data is collected script will prompt you to press ctrl + c to stop execution, save all files into single zip and do cleanup")
         print(" - Create a ZIP archive with all sessions and logs upon interruption")
         print("=" * 80)
         print("📦 Temp directory used:", TEMP_DIR)
-        print("📅 Schedule: Every 6 hours (Ignore this as you can stop script once it completes data collection by ctrl + c)")
         print(f"🌐 Proxy Mode: {'Enabled' if proxy_mode else 'Disabled'}")
+        print("[IMPORTANT] Once data is collected script will prompt you to press ctrl + c to stop execution, script will automatically then save all files to zip and do cleanup")
         if proxy_mode:
             print(f"🔌 Proxy IP: {PROXY_IP}, Port: {PROXY_PORT}")
         print("=" * 80)
