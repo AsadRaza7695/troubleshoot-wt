@@ -21,17 +21,21 @@ jobs:
 
       - name: Build Watchdog Troubleshoot Binary on CentOS 8
         run: |
-          docker run --rm -v $(pwd)/troubleshoot-wt:/app centos8-pyinstaller-builder bash -c "
-            cd /app/src &&
-            pip install -r requirements.txt &&
-            pip install pyinstaller &&
-            pyinstaller troubleshoot-wt.spec
-          "
+          docker run --rm \
+            -v $(pwd)/troubleshoot-wt:/app \
+            -v $(pwd)/build_output:/app/src/dist \
+            centos8-pyinstaller-builder bash -c "
+              cd /app/src &&
+              pip install -r requirements.txt &&
+              pip install pyinstaller &&
+              pyinstaller troubleshoot-wt.spec
+            "
+
 
       - name: Prepare CentOS Troubleshoot Artifact for Upload
         run: |
           mkdir -p centos8_troubleshoot_binary
-          cp troubleshoot-wt/src/dist/watchdog-troubleshoot centos8_troubleshoot_binary/
+          cp build_output/watchdog-troubleshoot centos8_troubleshoot_binary/
 
       
       - name: Upload Watchdog Troubleshoot Artifact
