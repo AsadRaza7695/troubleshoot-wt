@@ -1,0 +1,32 @@
+name: Build Troubleshooter
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build_troubleshoot-wt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12.8
+
+      - name: Install Dependencies
+        run: pip install -r troubleshoot-wt/src/requirements.txt
+
+      - name: Build with PyInstaller (using .spec file)
+        run: pyinstaller troubleshoot-wt/src/troubleshoot-wt.spec
+
+      - name: Upload Built Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: troubleshoot-wt
+          path: dist/
