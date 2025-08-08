@@ -25,7 +25,7 @@ jobs:
       - name: Prepare CentOS Troubleshoot Artifact for Upload
         run: |
           mkdir -p centos8_troubleshoot_binary
-          cp dist/troubleshoot-wt/troubleshoot-wt centos8_troubleshoot_binary/
+          cp dist/troubleshoot-wt centos8_troubleshoot_binary/
       
       - name: Upload Watchdog Troubleshoot Artifact
         uses: actions/upload-artifact@v4
