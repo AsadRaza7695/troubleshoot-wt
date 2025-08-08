@@ -9,7 +9,6 @@ on:
 jobs:
   build_installer_centos:
     name: Build Watchdog Troubleshooter (CentOS 8)
-    needs: update_version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Updated Code
