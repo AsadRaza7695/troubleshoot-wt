@@ -7,26 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_troubleshoot-wt:
-    runs-on: ubuntu-22.04
-
+  build_installer_centos:
+    name: Build Watchdog Troubleshooter (CentOS 8)
+    needs: update_version
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Updated Code
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
         with:
-          python-version: 3.12.8
+          ref: ${{ github.ref_name }}
 
-      - name: Install Dependencies
-        run: pip install -r troubleshoot-wt/src/requirements.txt
+      - name: Build CentOS 8 Docker Image for troubleshoot
+        run: docker build -t centos8-pyinstaller-builder -f .github/workflows/Dockerfile.centos8 .
 
-      - name: Build with PyInstaller (using .spec file)
-        run: pyinstaller troubleshoot-wt/src/troubleshoot-wt.spec
+      - name: Build Watchdog Troubleshoot Binary on CentOS 8
+        run: docker run --rm -v $(pwd):/app centos8-pyinstaller-builder bash -c "pip install pyinstaller && pyinstaller troubleshoot-wt.spec"
 
-      - name: Upload Built Artifact
+      - name: Prepare CentOS Troubleshoot Artifact for Upload
+        run: |
+          mkdir -p centos8_troubleshoot_binary
+          cp dist/watchdog-troubleshoot centos8_troubleshoot_binary/
+      
+      - name: Upload Watchdog Troubleshoot Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: troubleshoot-wt
-          path: dist/
+          name: watchdog-troubleshoot-centos8
+          path: centos8_troubleshoot_binary/

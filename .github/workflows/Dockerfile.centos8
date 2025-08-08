@@ -1,0 +1,23 @@
+FROM quay.io/centos/centos:stream8
+
+# Update repositories and install build dependencies including those for building Python with pyenv
+RUN cd /etc/yum.repos.d/ && \
+    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* && \
+    dnf clean all && \
+    dnf update -y && \
+    dnf install -y gcc openssl-devel pkg-config make curl git \
+                   bzip2-devel libffi-devel zlib-devel readline-devel sqlite-devel xz-devel
+
+# Install pyenv using the official installer
+RUN curl https://pyenv.run | bash
+
+# Set environment variables for pyenv and add its shims to PATH
+ENV PYENV_ROOT="/root/.pyenv"
+ENV PATH="${PYENV_ROOT}/bin:${PYENV_ROOT}/shims:${PATH}"
+
+# Install Python 3.12 using pyenv and set it as the global version
+RUN pyenv install 3.12.8 && pyenv global 3.12.8
+
+# Set working directory
+WORKDIR /app

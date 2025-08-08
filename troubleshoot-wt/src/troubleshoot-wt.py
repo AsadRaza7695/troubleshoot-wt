@@ -533,7 +533,7 @@ if __name__ == '__main__':
         print(" - Create a ZIP archive with all sessions and logs upon interruption")
         print("=" * 80)
         print("📦 Temp directory used:", TEMP_DIR)
-        print("📅 Schedule: Every 6 hours")
+        print("📅 Schedule: Every 6 hours (Ignore this as you can stop script once it completes data collection by ctrl + c)")
         print(f"🌐 Proxy Mode: {'Enabled' if proxy_mode else 'Disabled'}")
         if proxy_mode:
             print(f"🔌 Proxy IP: {PROXY_IP}, Port: {PROXY_PORT}")
