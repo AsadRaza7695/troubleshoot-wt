@@ -13,10 +13,141 @@ import json
 import threading
 import traceback
 
+def check_sudo_privileges():
+    """Check if script is running with sudo/root privileges"""
+    if os.geteuid() != 0:
+        print("❌ ERROR: This script requires sudo/root privileges to run tcpdump")
+        print("Please run the script with sudo:")
+        print(f"   sudo python3 {os.path.basename(__file__)}")
+        print()
+        print("Why sudo is needed:")
+        print("  - tcpdump requires root privileges to capture network packets")
+        print("  - Reading system log files from /opt directories may require elevated access")
+        return False
+    return True
+
+def check_tcpdump_availability():
+    """Check if tcpdump is available and working"""
+    try:
+        # Check if tcpdump command exists
+        result = subprocess.run(['which', 'tcpdump'], 
+                              capture_output=True, 
+                              text=True, 
+                              timeout=5)
+        if result.returncode != 0:
+            print("❌ tcpdump not found. Please install it:")
+            print("   Ubuntu/Debian: sudo apt install tcpdump")
+            print("   CentOS/RHEL:   sudo yum install tcpdump")
+            return False
+            
+        # Test tcpdump with version check
+        result = subprocess.run(['tcpdump', '--version'], 
+                              capture_output=True, 
+                              text=True, 
+                              timeout=5)
+        
+        if result.returncode != 0:
+            print("❌ tcpdump is installed but not working properly:")
+            if "liblzma.so.5" in result.stderr:
+                print("   Missing library error detected. Try:")
+                print("   Ubuntu/Debian: sudo apt install liblzma5")
+                print("   CentOS/RHEL:   sudo yum install xz-libs")
+            else:
+                print(f"   Error: {result.stderr}")
+            return False
+            
+        print("✅ tcpdump is available and working")
+        return True
+        
+    except subprocess.TimeoutExpired:
+        print("❌ tcpdump check timed out")
+        return False
+    except Exception as e:
+        print(f"❌ Error checking tcpdump: {e}")
+        return False
+
+def check_system_requirements():
+    """Comprehensive system requirements check"""
+    print("🔍 Checking system requirements...")
+    print("=" * 50)
+    
+    requirements_met = True
+    
+    # 1. Check sudo privileges
+    print("1. Checking sudo privileges...")
+    if not check_sudo_privileges():
+        requirements_met = False
+    else:
+        print("✅ Running with sudo/root privileges")
+    
+    # 2. Check tcpdump
+    print("\n2. Checking tcpdump availability...")
+    tcpdump_available = check_tcpdump_availability()
+    if not tcpdump_available:
+        requirements_met = False
+    
+    # 3. Check Python modules
+    print("\n3. Checking Python modules...")
+    required_modules = [
+        'requests', 'psutil', 'configparser', 
+        'apscheduler', 'urllib.parse'
+    ]
+    
+    missing_modules = []
+    for module in required_modules:
+        try:
+            __import__(module.split('.')[0])
+            print(f"✅ {module}")
+        except ImportError:
+            print(f"❌ {module}")
+            missing_modules.append(module)
+            requirements_met = False
+    
+    if missing_modules:
+        print(f"\nInstall missing modules with:")
+        print(f"   pip install {' '.join(missing_modules)}")
+    
+    # 4. Check config file
+    print("\n4. Checking configuration file...")
+    config_path = "/opt/watchdog/watchdog/watchdog.conf"
+    if os.path.exists(config_path):
+        print(f"✅ Config file found: {config_path}")
+        try:
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            proxy_mode = config.getboolean('proxy', 'proxy_mode', fallback=False)
+            print(f"✅ Config readable, proxy_mode: {proxy_mode}")
+        except Exception as e:
+            print(f"⚠️  Config file exists but has issues: {e}")
+    else:
+        print(f"⚠️  Config file not found: {config_path}")
+        print("    Script will use fallback values")
+    
+    # 5. Check network connectivity
+    print("\n5. Testing basic network connectivity...")
+    try:
+        response = requests.get('http://httpbin.org/ip', timeout=10)
+        print("✅ Basic internet connectivity working")
+    except Exception as e:
+        print(f"⚠️  Network connectivity issue: {e}")
+        print("    This may affect download tests")
+    
+    print("=" * 50)
+    
+    if requirements_met and tcpdump_available:
+        print("🎉 All requirements met! Script can run with full functionality.")
+        return True, True
+    elif requirements_met:
+        print("⚠️  Requirements met but tcpdump unavailable.")
+        print("    Script will run with limited functionality (no packet capture).")
+        return True, False
+    else:
+        print("❌ Critical requirements not met. Please fix the above issues.")
+        return False, False
+
 # Create temporary directory for files before zipping
 TEMP_DIR = 'temp_capture'
 os.makedirs(TEMP_DIR, exist_ok=True)
-
 
 # Setup logging
 logging.basicConfig(
@@ -33,7 +164,6 @@ file_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
 ))
 logger.addHandler(file_handler)
-
 
 # Configuration
 PHISHTANK_URL = 'http://data.phishtank.com/data/online-valid.csv.bz2'
@@ -80,12 +210,11 @@ if proxy_mode:
     else:
         raise ValueError("Proxy mode is enabled but no proxy URL found.")
 
-
-# Global variable to control shutdown
+# Global variables
 job_executed = False
-
 MAX_RETRIES = 3
 RETRY_DELAY = 30
+TCPDUMP_AVAILABLE = False  # Will be set by requirements check
 
 def get_system_diagnostics():
     """Capture comprehensive system diagnostics"""
@@ -372,6 +501,7 @@ Last Session: {end_time}
 Proxy Mode: {proxy_mode}
 Proxy IP: {PROXY_IP}
 Proxy Port: {PROXY_PORT}
+TCPDUMP Available: {TCPDUMP_AVAILABLE}
 
 Session Details:
 """
@@ -424,31 +554,40 @@ def collect_data_with_capture(label=""):
         'pre_session_connectivity': test_proxy_connectivity() if proxy_mode else None,
         'pre_session_processes': get_process_info(),
         'download_attempts': {},
-        'had_errors': False
+        'had_errors': False,
+        'tcpdump_available': TCPDUMP_AVAILABLE
     }
 
-    logger.info(f"Starting tcpdump to {pcap_file}")
-
     tcpdump_proc = None
-    if proxy_mode:
+    if proxy_mode and TCPDUMP_AVAILABLE:
+        logger.info(f"Starting tcpdump to {pcap_file}")
         logger.info(f"Monitoring traffic to proxy at {PROXY_IP}:{PROXY_PORT}")
-        tcpdump_proc = subprocess.Popen(
-            ['tcpdump', '-i', 'any', 'tcp', 'and', 'host', PROXY_IP, 'and', 'port', str(PROXY_PORT), '-w', pcap_file],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        
+        try:
+            tcpdump_proc = subprocess.Popen(
+                ['tcpdump', '-i', 'any', 'tcp', 'and', 'host', PROXY_IP, 'and', 'port', str(PROXY_PORT), '-w', pcap_file],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True
+            )
 
-        # Start a thread to capture and log stderr output
-        def log_tcpdump_stderr(pipe, logfile_path):
-            with open(logfile_path, 'w') as log_file:
-                for line in iter(pipe.readline, ''):
-                    logger.warning(f"[tcpdump] {line.strip()}")
-                    log_file.write(line)
-                pipe.close()
+            # Start a thread to capture and log stderr output
+            def log_tcpdump_stderr(pipe, logfile_path):
+                with open(logfile_path, 'w') as log_file:
+                    for line in iter(pipe.readline, ''):
+                        logger.warning(f"[tcpdump] {line.strip()}")
+                        log_file.write(line)
+                    pipe.close()
 
-        threading.Thread(target=log_tcpdump_stderr, args=(tcpdump_proc.stderr, dumplog_file), daemon=True).start()
-
+            threading.Thread(target=log_tcpdump_stderr, args=(tcpdump_proc.stderr, dumplog_file), daemon=True).start()
+        except Exception as e:
+            logger.error(f"Failed to start tcpdump: {e}")
+            session_diagnostics['tcpdump_error'] = str(e)
+    elif proxy_mode and not TCPDUMP_AVAILABLE:
+        logger.warning("tcpdump not available - skipping packet capture")
+        session_diagnostics['tcpdump_skipped'] = "tcpdump not available"
+    else:
+        logger.info("Proxy mode disabled - skipping tcpdump")
 
     try:
         time.sleep(2)  # Allow tcpdump to initialize
@@ -457,6 +596,7 @@ def collect_data_with_capture(label=""):
             log.write(f"Network Capture Session - {timestamp}\n")
             log.write(f"Label: {label or 'scheduled'}\n")
             log.write(f"Proxy: {PROXY_IP}:{PROXY_PORT}\n")
+            log.write(f"TCPDUMP Available: {TCPDUMP_AVAILABLE}\n")
             log.write(f"Scheduler Context: {session_diagnostics['scheduler_context']}\n")
             log.write("="*50 + "\n\n")
             
@@ -539,7 +679,7 @@ def collect_data_with_capture(label=""):
             logger.warning(f"⚠️  Session had connection errors - check diagnostics file")
         
         if not label:
-            logger.info("✅ TCPDUMP for Scheduler is completed, you can now stop script by pressing 'ctrl + c'")
+            logger.info("✅ Session completed, you can now stop script by pressing 'ctrl + c'")
 
 def cleanup_temp_directory():
     """Clean up the temporary directory on exit"""
@@ -553,12 +693,25 @@ def cleanup_temp_directory():
         logger.error(f"Failed to cleanup temporary directory: {e}")
 
 if __name__ == '__main__':
+    # Check system requirements before starting
+    requirements_ok, tcpdump_ok = check_system_requirements()
+    
+    if not requirements_ok:
+        print("\n❌ Critical requirements not met. Exiting.")
+        exit(1)
+    
+    # Set global tcpdump availability
+    TCPDUMP_AVAILABLE = tcpdump_ok
+    
     try:
-        print("=" * 80)
+        print("\n" + "=" * 80)
         print("🛡️  Watchdog Network Diagnostics Script")
         print("=" * 80)
         print("This script will perform the following actions:")
-        print(" - Capture network traffic (pcap) to the proxy IP/port using tcpdump")
+        if TCPDUMP_AVAILABLE:
+            print(" - Capture network traffic (pcap) to the proxy IP/port using tcpdump")
+        else:
+            print(" - ⚠️  Skip network packet capture (tcpdump not available)")
         print(" - Attempt downloads from PhishTank and URLHaus (via proxy if enabled)")
         print(" - Log detailed diagnostics (system info, proxy tests, process info, scheduler)")
         print(" - Store each session's diagnostics in JSON and a final ZIP")
@@ -568,6 +721,7 @@ if __name__ == '__main__':
         print("=" * 80)
         print("📦 Temp directory used:", TEMP_DIR)
         print(f"🌐 Proxy Mode: {'Enabled' if proxy_mode else 'Disabled'}")
+        print(f"📡 TCPDUMP Available: {'Yes' if TCPDUMP_AVAILABLE else 'No'}")
         print("[IMPORTANT] Once data is collected script will prompt you to press ctrl + c to stop execution, script will automatically then save all files to zip and do cleanup")
         if proxy_mode:
             print(f"🔌 Proxy IP: {PROXY_IP}, Port: {PROXY_PORT}")
