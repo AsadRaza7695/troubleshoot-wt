@@ -18,11 +18,11 @@ def check_sudo_privileges():
     if os.geteuid() != 0:
         print("❌ ERROR: This script requires sudo/root privileges to run tcpdump")
         print("Please run the script with sudo:")
-        print(f"   sudo python3 {os.path.basename(__file__)}")
+        print("   sudo ./troubleshoot-wt")
         print()
         print("Why sudo is needed:")
         print("  - tcpdump requires root privileges to capture network packets")
-        print("  - Reading system log files from /opt directories may require elevated access")
+        print("  - Reading eti log files from /opt directories may require elevated access")
         return False
     return True
 
