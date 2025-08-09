@@ -26,44 +26,53 @@ def check_sudo_privileges():
         return False
     return True
 
+import subprocess
+
 def check_tcpdump_availability():
     """Check if tcpdump is available and working"""
     try:
-        # Check if tcpdump command exists
-        result = subprocess.run(['which', 'tcpdump'], 
-                              capture_output=True, 
-                              text=True, 
-                              timeout=5)
+        # Check if tcpdump exists
+        result = subprocess.run(
+            ['which', 'tcpdump'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
         if result.returncode != 0:
             print("❌ tcpdump not found. Please install it:")
             print("   Ubuntu/Debian: sudo apt install tcpdump")
             print("   CentOS/RHEL:   sudo yum install tcpdump")
             return False
-            
-        # Test tcpdump with version check
-        result = subprocess.run(['tcpdump', '--version'], 
-                              capture_output=True, 
-                              text=True, 
-                              timeout=5)
-        
+
+        # Check if tcpdump can run
+        result = subprocess.run(
+            ['tcpdump', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
         if result.returncode != 0:
             print("❌ tcpdump is installed but not working properly:")
-            if "liblzma.so.5" in result.stderr:
-                print("   Missing library error detected. Try:")
-                print("   Ubuntu/Debian: sudo apt install liblzma5")
-                print("   CentOS/RHEL:   sudo yum install xz-libs")
+            err_output = (result.stderr or result.stdout).strip()
+            if err_output:
+                print(f"   Error message from tcpdump: {err_output}")
             else:
-                print(f"   Error: {result.stderr}")
+                print("   No error message provided by tcpdump.")
+
+            # Optional: suggest checking missing libraries
+            print("\n💡 Hint: You can check missing dependencies with:")
+            print("   ldd $(which tcpdump)")
             return False
-            
+
         print("✅ tcpdump is available and working")
         return True
-        
+
     except subprocess.TimeoutExpired:
         print("❌ tcpdump check timed out")
         return False
     except Exception as e:
-        print(f"❌ Error checking tcpdump: {e}")
+        print(f"❌ Unexpected error while checking tcpdump: {e}")
         return False
 
 def check_system_requirements():
